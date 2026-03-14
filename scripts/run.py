@@ -71,12 +71,11 @@ if __name__ == "__main__":
     print("Loading Detoxify...")
     detox = Detoxify("original", device=device)
 
-    steerer = ProbeLoader.steerer(model, probe_dir, alpha = ALPHA, filter=lambda l: l in LAYERS_TO_STEER)
-    monitor = ProbeLoader.monitor(model, probe_dir, filter=lambda l: l in LAYERS_TO_STEER)
+    steerer = ProbeLoader.steerer(model, probe_dir, alpha = ALPHA, filter=lambda meta: meta["layer"] in LAYERS_TO_STEER)
+    monitor = ProbeLoader.monitor(model, probe_dir, filter=lambda meta: meta["layer"] in LAYERS_TO_STEER)
     results = []
 
-    probes_token = [Probe.load_from_file(f"outputs/v2/probes/layer_{l}.pt") for l in LAYERS_TO_STEER]
-    steerer_token = ProbeLoader.steerer(model, probe_dir, alpha = 1.0 , filter=lambda l: l in LAYERS_TO_STEER)
+    steerer_token = ProbeLoader.steerer(model, f"outputs/v2/probes/registry.json", alpha = 1.0 , filter=lambda meta: meta["layer"] in LAYERS_TO_STEER)
     os.makedirs("plots", exist_ok=True)
 
     for i, prompt in enumerate(tqdm(PROMPTS, desc="Benchmarking & Plotting")):

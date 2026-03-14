@@ -23,8 +23,8 @@ class ProbeLoader:
             if not key.isdigit(): # skip global keys
                 continue
             
-            path = os.path.join(dir, meta["filename"])
-            probe = Probe.load_from_file(path)
+            probe_path = os.path.join(dir, meta["filename"])
+            probe = Probe.load_from_file(probe_path)
             probes[probe.meta["layer"]] = probe
             
         return probes
@@ -44,7 +44,7 @@ class ProbeLoader:
                 std_act=data["std_act"],
                 **data["meta"]
             )
-            probes[probe.meta["layer"]][probe]
+            probes[probe.meta["layer"]] = probe
             
         return probes
     
@@ -85,7 +85,7 @@ class ProbeLoader:
             probes = {k: v for k, v in probes.items() if filter(v.meta)}
         
         if callable(alpha):
-            probe_list = {k: v for k, v in probes.items() if filter(v.meta)}
+            probe_list = [(p, alpha(p.meta)) for p in probes.values()]
         elif isinstance(alpha, dict):
             probe_list = [(p, alpha.get(layer, 20.0)) for layer, p in probes.items()]
         else:
