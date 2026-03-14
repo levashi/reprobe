@@ -1,7 +1,7 @@
 from typing import Literal
 import torch
-from scripts.compute_probs import Probe
-from scripts.hook import Hook
+from .probe import Probe
+from .hook import Hook
 
 class Monitor(Hook):
     def __init__(self, model, probes: list[Probe]):
