@@ -4,3 +4,4 @@ tqdm
 accelerate
 detoxify
 matplotlib
+pytest
