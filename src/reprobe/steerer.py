@@ -1,4 +1,5 @@
 from typing import Literal
+from regex import D
 import torch
 from .hook import Hook
 from .probe import Probe
@@ -29,16 +30,9 @@ class Steerer(Hook):
             hidden = output[0] if isinstance(output, tuple) else output
             
             if self.mode == "projected":
-                # Scalair product
-                # (batch, seq, dim) @ (dim,) -> (batch, seq)
-                dot_product = torch.matmul(hidden, direction)
-                
-                # (batch, seq, 1) * (dim,) -> (batch, seq, dim)
-                projection = dot_product.unsqueeze(-1) * direction
-                
-                hidden = hidden - alpha * projection
+                hidden = self._apply_projection(hidden, direction, alpha)
             else:
-                hidden = hidden - alpha * direction
+                hidden = self._apply_uniform(hidden, direction, alpha)
             
             if isinstance(output, tuple):
                 return (hidden,) + output[1:]
@@ -46,6 +40,20 @@ class Steerer(Hook):
             return hidden
         return _hook_fn
 
+    def _apply_projection(hidden, direction, alpha):
+        # Scalair product
+        # (batch, seq, dim) @ (dim,) -> (batch, seq)
+        dot_product = torch.matmul(hidden, direction)
+                
+        # (batch, seq, 1) * (dim,) -> (batch, seq, dim)
+        projection = dot_product.unsqueeze(-1) * direction
+        
+        hidden = hidden - alpha * projection
+        return hidden
+    
+    def _apply_uniform(hidden, direction, alpha):
+        return hidden - alpha * direction
+    
     def _get_layers_to_hook(self):
         return [(probe.meta["layer"], (probe, alpha)) for probe, alpha in self.probes]
     
