@@ -59,7 +59,7 @@ class Interceptor(Hook):
             stacked = stacked.permute(1, 0, 2)   # [batch, num_layers, hidden_dim]
             
             for i in range(stacked.shape[0]):
-                self.activations.append(stacked[i].unsqueeze(0))
+                self.activations.append(stacked[i].unsqueeze(0)) #[1, num_layers, hidden_dim]
             
             self._acts_buffer = {}
             if block_capture:
