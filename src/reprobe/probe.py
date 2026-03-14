@@ -7,9 +7,6 @@ from torch.utils.data import DataLoader, TensorDataset, random_split
 from sklearn.metrics import roc_auc_score
 import tqdm
 
-
-
-
 class ProbesTrainer():
     def __init__(self, model_id: str, hidden_dim: int, device: torch.device = "cpu"):
         self.model_id = model_id
@@ -149,7 +146,7 @@ class ProbesTrainer():
         else:
             for layer, probe in self.probes.items():
                 registry[layer] = probe._to_save()
-            torch.save(registry, os.path.join(dir, f"probes_{self.model_id}"))
+            torch.save(registry, os.path.join(dir, f"{self.model_id}_probes.pt"))
         
 class Probe(nn.Module):
     def __init__(
@@ -222,4 +219,3 @@ class Probe(nn.Module):
         probe.load_state_dict(checkpoint["state_dict"])
         
         return probe
-        

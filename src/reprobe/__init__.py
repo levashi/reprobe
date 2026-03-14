@@ -1,14 +1,15 @@
 from .hook import Hook
-from .probe import Probe
+from .probe import Probe, ProbesTrainer
 from .interceptor import Interceptor
 from .monitor import Monitor
 from .steerer import Steerer
-
+from .loader import ProbeLoader
 __version__ = "0.1.0"
 __all__ = [
     "Hook",
     "Probe",
-    "ProbeTrainer",
+    "ProbesTrainer",
+    "ProbeLoader",
     "Interceptor",
     "Monitor",
     "Steerer"

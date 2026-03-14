@@ -6,7 +6,7 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from detoxify import Detoxify
 from tqdm import tqdm
-from reprobe import Steerer, Probe, Monitor
+from reprobe import Steerer, Probe, Monitor, ProbeLoader
 
 logging.basicConfig(
     level=logging.INFO,
@@ -38,7 +38,7 @@ if __name__ == "__main__":
         config = tomllib.load(f)
 
     model_id = config["model"]["name"]
-    probe_dir = "outputs/v2/prefill/probes"
+    probe_dir = "outputs/v2/prefill/probes/registry.json"
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     LAYERS_TO_STEER = [12, 13, 14, 15, 16]
@@ -71,38 +71,36 @@ if __name__ == "__main__":
     print("Loading Detoxify...")
     detox = Detoxify("original", device=device)
 
-    probes = [Probe.load_from_file(f"{probe_dir}/layer_{l}.pt") for l in LAYERS_TO_STEER]
-    steerer = Steerer(model, probes=probes, alpha=ALPHA)
-    listener = Monitor(model, probes=probes) # On utilise les mêmes probes
-
+    steerer = ProbeLoader.steerer(model, probe_dir, alpha = ALPHA, filter=lambda l: l in LAYERS_TO_STEER)
+    monitor = ProbeLoader.monitor(model, probe_dir, filter=lambda l: l in LAYERS_TO_STEER)
     results = []
 
     probes_token = [Probe.load_from_file(f"outputs/v2/probes/layer_{l}.pt") for l in LAYERS_TO_STEER]
-    steerer_token = Steerer(model, probes=probes, alpha=1.0)
+    steerer_token = ProbeLoader.steerer(model, probe_dir, alpha = 1.0 , filter=lambda l: l in LAYERS_TO_STEER)
     os.makedirs("plots", exist_ok=True)
 
     for i, prompt in enumerate(tqdm(PROMPTS, desc="Benchmarking & Plotting")):
         inputs = tokenizer(prompt, return_tensors="pt").to(device)
 
         # --- MODE BASE ---
-        listener.attach()
+        monitor.attach()
         text_base = generate(model, tokenizer, inputs, MAX_NEW_TOKENS)
         # On récupère la trajectoire (moyenne des couches par token)
-        history_base = [sum(step.values())/len(step) for step in listener.claim_results(flush_buffer=False)]
+        history_base = [sum(step.values())/len(step) for step in monitor.claim_results(flush_buffer=False)]
         score_base_ext = score(detox, text_base)
-        score_base_int = listener.score()
-        listener.detach()
+        score_base_int = monitor.score()
+        monitor.detach()
 
         # --- MODE STEERED ---
         steerer.attach()
         steerer_token.attach()
-        listener.attach()
+        monitor.attach()
         text_steered = generate(model, tokenizer, inputs, MAX_NEW_TOKENS)
-        history_steered = [sum(step.values())/len(step) for step in listener.claim_results(flush_buffer=False)]
+        history_steered = [sum(step.values())/len(step) for step in monitor.claim_results(flush_buffer=False)]
         score_steered_ext = score(detox, text_steered)
-        score_steered_int = listener.score() 
+        score_steered_int = monitor.score() 
         steerer_token.detach()
-        listener.detach()
+        monitor.detach()
         steerer.detach()
 
         # --- GÉNÉRATION DU GRAPHIQUE ---
