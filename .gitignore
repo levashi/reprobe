@@ -1,0 +1,5 @@
+.vscode/
+venv/
+outputs/
+__pycache__
+plots
