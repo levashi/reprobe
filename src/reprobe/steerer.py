@@ -1,5 +1,4 @@
 from typing import Literal
-from regex import D
 import torch
 from .hook import Hook
 from .probe import Probe

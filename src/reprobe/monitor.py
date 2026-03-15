@@ -62,7 +62,7 @@ class Monitor(Hook):
             self._current_step_data = {}
             
     def get_history(self, flush_buffer = True):
-        self._flush_step
+        self._flush_step()
         if not self.history or len(self.history) == 0:
             if flush_buffer:
                 self.flush_buffer()
