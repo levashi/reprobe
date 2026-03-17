@@ -1,3 +1,4 @@
+from cProfile import label
 import json
 import os
 from typing import Literal
@@ -13,7 +14,7 @@ class ProbesTrainer():
     def __init__(self, model_id: str, hidden_dim: int, device: torch.device = "cpu"):
         self.model_id = model_id
         self.hidden_dim = hidden_dim
-        self.probes: dict[int, Probe] = {}
+        self.probes: dict[str, int, Probe] = {"prefill": {}, "token": {}}
         self.device = device
         
         # defaults, overridables
@@ -96,10 +97,10 @@ class ProbesTrainer():
     
     def train_probes(
         self,
-        acts: torch.Tensor,    # [N, num_layers, hidden_dim]
-        labels: torch.Tensor,  # [N]
+        acts: dict[str, torch.Tensor | None],    # {"prefill": [N, num_layers, hidden_dim] | None, "token": [N, num_layers, hidden_dim] | None}
+        labels: dict[str, torch.Tensor | None],  # {"prefill": [N] | None, "token": [N] | None}
         concepts: list[str],
-        training_mode: Literal["prefill", "token"]  = "token",
+        training_mode: Literal["prefill", "token", "all"]  = "prefill",
         layer_offset: int = 0,
         epochs: int = 15,
         batch_size: int = 32,
@@ -107,36 +108,58 @@ class ProbesTrainer():
         show_stats: bool = True
     ):
         self.training_mode = training_mode
-        y = (labels > 0.5).float().unsqueeze(1) # from probability to bool
-        
-        num_layers = acts.shape[1]
-        
-        self.num_layers = num_layers
-        self.layer_offset = layer_offset
-        
-        for layer_idx in tqdm.tqdm(range(num_layers), desc="Training Probe", disable=not show_tqdm):
-            real_layer = layer_offset + layer_idx
-            probe = Probe(
-                hidden_dim=self.hidden_dim,
-                concepts=concepts,
-                layer = real_layer,
-                model_id=self.model_id,
-                training_mode = training_mode,
-            ).to(self.device)
+        # Checks
+        if training_mode != "all" and acts[training_mode] is None:
+            raise ValueError(f"mode='{training_mode}' but acts['{training_mode}'] is None")
+        if training_mode == "all":
+            if acts["prefill"] is None:
+                raise ValueError("mode='all' but acts['prefill'] is None")
+            if acts["token"] is None:
+                raise ValueError("mode='all' but acts['token'] is None")
             
-            acc = self._train_one(
-                probe, 
-                acts[:, layer_idx, :],
-                y,
-                epochs,
-                show_tqdm=show_tqdm,
-                batch_size=batch_size
-            )
-            probe.meta["auc"] = round(acc, 4)
-            self.probes[real_layer] = probe
+        if training_mode != "all" and labels[training_mode] is None:
+            raise ValueError(f"mode='{training_mode}' but labels['{training_mode}'] is None")
+        if training_mode == "all":
+            if labels["prefill"] is None:
+                raise ValueError("mode='all' but labels['prefill'] is None")
+            if labels["token"] is None:
+                raise ValueError("mode='all' but labels['token'] is None")
+        
+        modes_to_train = ["prefill", "token"] if training_mode == "all" else [training_mode]
+        for mode in modes_to_train:
+            mode_acts = acts[mode]       # Tensor [N, num_layers, hidden_dim]
+            mode_labels = labels[mode]   # Tensor [N]
             
-            if show_stats:
-                tqdm.tqdm.write(f"Layer {real_layer} | ROC-AUC: {acc:.3f}")
+            y = (mode_labels > 0.5).float().unsqueeze(1) # from probability to bool
+            
+            num_layers = mode_acts.shape[1]
+            
+            self.num_layers = num_layers
+            self.layer_offset = layer_offset
+            
+            for layer_idx in tqdm.tqdm(range(num_layers), desc=f"Training Probes - mode: {mode}", disable=not show_tqdm):
+                real_layer = layer_offset + layer_idx
+                probe = Probe(
+                    hidden_dim=self.hidden_dim,
+                    concepts=concepts,
+                    layer = real_layer,
+                    model_id=self.model_id,
+                    training_mode = mode,
+                ).to(self.device)
+                
+                acc = self._train_one(
+                    probe, 
+                    mode_acts[:, layer_idx, :],
+                    y,
+                    epochs,
+                    show_tqdm=show_tqdm,
+                    batch_size=batch_size
+                )
+                probe.meta["auc"] = round(acc, 4)
+                self.probes[mode][real_layer] = probe
+                
+                if show_stats:
+                    tqdm.tqdm.write(f"{mode} | Layer {real_layer} | ROC-AUC: {acc:.3f}")
     
     def save(self, dir: str, one_file: bool = False, merge = False):
         if not self.training_mode:
@@ -165,19 +188,25 @@ class ProbesTrainer():
                     registry = json.load(f)
             else:
                 registry = torch.load(path)
+        modes_to_save = ["prefill", "token"] if self.training_mode == "all" else [self.training_mode]
+        for mode in modes_to_save:
+            if not one_file:
+                for layer, probe in self.probes[mode].items():
+                    filename = f"{mode}_layer_{layer}.pt"
+                    probe.save(os.path.join(dir, filename))
+                    registry["probes"][mode][layer] = {**probe.meta, "filename": filename}
+            else:
+                for layer, probe in self.probes[mode].items():
+                    registry["probes"][mode][layer] = probe._to_save()
+                
+        
+        # Save
         if not one_file:
-            
-            for layer, probe in self.probes.items():
-                filename = f"layer_{layer}.pt"
-                probe.save(os.path.join(dir, filename))
-                registry["probes"][self.training_mode][layer] = {**probe.meta, "filename": filename}
             with open(path, "w") as f:
                 json.dump(registry, f, indent=2)
         else:
-            for layer, probe in self.probes.items():
-                registry["probes"][self.training_mode][layer] = probe._to_save()
             torch.save(registry, path)
-        
+            
 class Probe(nn.Module):
     def __init__(
         self, 

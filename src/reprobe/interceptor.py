@@ -68,17 +68,25 @@ class Interceptor(Hook):
             stacked_cpu = stacked.permute(1, 0, 2).cpu()   # [batch, num_layers, hidden_dim] to cpu
             
             for i in range(stacked_cpu.shape[0]):
-                self._activations[to] = [stacked_cpu[i].unsqueeze(0)] #[1, num_layers, hidden_dim]
+                self._activations[to] += [stacked_cpu[i].unsqueeze(0)] #[1, num_layers, hidden_dim]
             
             self._acts_buffer = {}
             if block_capture:
                 self._capture_next = False
     
     
-    def finalize(self):
+    def finalize(self, reset=True):
         if self.training_mode in ("token", "all"):
             self._flush("token", block_capture=True)
         result = {}
         for key, acts in self._activations.items():
             result[key] = torch.cat(acts) if acts else None
+        if reset:
+            self.reset()
         return result
+    
+    def reset(self):
+        self._activations = {"prefill": [], "token": []}
+        self._acts_buffer = {}
+        self._capture_next = False
+        self._was_prefill = True

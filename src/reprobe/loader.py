@@ -28,17 +28,16 @@ class ProbeLoader:
         if not training_mode or training_mode not in ["prefill", "token", "all"]:
                 raise ValueError(f"Registry has an invalid mode: {training_mode}. Must be between 'token', 'prefill' and 'all'")
                 
-        items = registry["probes"][training_mode].items() if training_mode != "all" else registry["probes"]["prefill"].items() + registry["probes"]["token"].items() 
-        
-        for key, meta in items:
-            probe_path = os.path.join(dir, meta["filename"])
-            probe = Probe.load_from_file(probe_path)
-            mode = probe.meta["training_mode"]
-            if not mode or mode not in ["prefill", "token"]:
-                logger.warning(f"Probe layer {probe.meta["layer"]} of {probe.meta["model_id"]} has an invalid mode: {mode}. Must be between 'token' and 'prefill'. Skipped")
-                continue
-            probes[mode][probe.meta["layer"]] = probe
-            
+        for mode in ["prefill", "token"]:
+            for key, meta in registry["probes"][mode].items():
+                probe_path = os.path.join(dir, meta["filename"])
+                probe = Probe.load_from_file(probe_path)
+                mode = probe.meta["training_mode"]
+                if not mode or mode not in ["prefill", "token"]:
+                    logger.warning(f"Probe layer {probe.meta["layer"]} of {probe.meta["model_id"]} has an invalid mode: {mode}. Must be between 'token' and 'prefill'. Skipped")
+                    continue
+                probes[mode][probe.meta["layer"]] = probe
+                
         return probes
     
     @staticmethod
@@ -52,20 +51,20 @@ class ProbeLoader:
             "prefill": {},
             "token": {}
         }
-        training_mode = content["training_mode"]
-        for key, data in content["probes"][training_mode].items():
-            probe = Probe.load(
-                data["state_dict"],
-                mean_act=data["mean_act"],
-                std_act=data["std_act"],
-                **data["meta"]
-            )
-            mode = probe.meta["training_mode"]
-            if not mode or mode not in ["prefill", "token"]:
-                logger.warning(f"Probe layer {probe.meta["layer"]} of {probe.meta["model_id"]} has an invalid mode: {mode}. Must be between 'token' and 'prefill'. Skipped")
-                continue
-            probes[mode][probe.meta["layer"]] = probe
-            
+        for mode in ["prefill", "token"]:
+            for key, data in content["probes"][mode].items():
+                probe = Probe.load(
+                    data["state_dict"],
+                    mean_act=data["mean_act"],
+                    std_act=data["std_act"],
+                    **data["meta"]
+                )
+                mode = probe.meta["training_mode"]
+                if not mode or mode not in ["prefill", "token"]:
+                    logger.warning(f"Probe layer {probe.meta["layer"]} of {probe.meta["model_id"]} has an invalid mode: {mode}. Must be between 'token' and 'prefill'. Skipped")
+                    continue
+                probes[mode][probe.meta["layer"]] = probe
+                
         return probes
     
     @staticmethod
