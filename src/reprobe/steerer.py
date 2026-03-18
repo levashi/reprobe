@@ -25,8 +25,16 @@ class Steerer(Hook):
         dtype = next(self.model.parameters()).dtype
         direction = probe.get_direction().to(device, dtype)
         
+        mode = probe.meta["training_mode"]
+        
         def _hook_fn(module, input, output):
             hidden = output[0] if isinstance(output, tuple) else output
+            
+            is_prefill = hidden.shape[1] > 1
+            if mode == "prefill" and not is_prefill:
+                return  # ignore generated tokens
+            elif mode == "token" and is_prefill:
+                return  # ignore prefill
             
             if self.mode == "projected":
                 hidden = Steerer._apply_projection(hidden, direction, alpha)

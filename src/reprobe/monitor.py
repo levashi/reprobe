@@ -30,11 +30,12 @@ class Monitor(Hook):
             raise ValueError(f"Probe must have training_mode beetween {accepted_modes}")
         def _hook_fn(module, input, output):
             hidden = output[0] if isinstance(output, tuple) else output
+            
             is_prefill = hidden.shape[1] > 1
             if mode == "prefill" and not is_prefill:
-                return  # ignore les tokens générés
+                return  # ignore generated tokens
             elif mode == "token" and is_prefill:
-                return  # ignore le prefill
+                return  # ignore prefill
                 
             # we got the last token
             # Shape: [batch, seq_len, hidden_dim] -> [batch, hidden_dim]
