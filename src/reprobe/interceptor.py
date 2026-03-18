@@ -21,6 +21,7 @@ class Interceptor(Hook):
         }
         self._capture_next = False  
         self._acts_buffer = {} # Utilisation d'un dict pour garantir l'ordre des layers
+        self._current_token_prompts = []
         
         self.start_layer = start_layer
         
@@ -52,15 +53,27 @@ class Interceptor(Hook):
             if len(self._acts_buffer) == (self.end_layer - self.start_layer):
                 if self.training_mode == "prefill":
                     self._flush("prefill", block_capture=True)
+                    
+                elif self.training_mode == "token":
+                    self._flush("token", block_capture=False)
+                    
                 elif self.training_mode == "all":
                     if is_prefill:
                         self._flush("prefill", block_capture=False)
                     else:
-                        self._flush("token")
+                        self._flush("token", block_capture=False)
+                        
         return _hook_fn
     
-    def allow_one_capture(self):
+    def allow_one_capture(self, batch_size):
         self._capture_next = True
+        if self.training_mode in ("token", "all"):
+            new_prompts = []
+            for _ in range(batch_size):
+                group = []
+                self._activations["token"].append(group)
+                new_prompts.append(group)
+            self._current_token_prompts = new_prompts 
         return self  
     
     def _flush(self, to: Literal["prefill", "token"] ,block_capture=True):
@@ -73,7 +86,10 @@ class Interceptor(Hook):
             stacked_cpu = stacked.permute(1, 0, 2).float().cpu()   # [batch, num_layers, hidden_dim] to cpu
             
             for i in range(stacked_cpu.shape[0]):
-                self._activations[to] += [stacked_cpu[i].unsqueeze(0)] #[1, num_layers, hidden_dim]
+                if to == "token":
+                    self._current_token_prompts[i].append(stacked_cpu[i])  # [num_layers, hidden_dim]
+                else:
+                    self._activations[to] += [stacked_cpu[i].unsqueeze(0)] #[1, num_layers, hidden_dim]
             
             self._acts_buffer = {}
             if block_capture:
@@ -86,15 +102,55 @@ class Interceptor(Hook):
         return super().attach()
     
     def finalize(self, reset=True):
+        """
+        Consolidate captured activations into a result dict.
+
+        Args:
+            reset: If True, clears internal buffers after finalization.
+
+        Return:
+            result where:
+                result["prefill"]: Tensor[N, num_layers, hidden_dim] or None
+                result["token"]:   list of Tensor[K_i, num_layers, hidden_dim] or None
+                                One tensor per prompt, K_i = tokens captured for that prompt.
+                                Use Interceptor.align() to flatten and label.
+        """
         if self.training_mode in ("token", "all"):
             self._flush("token", block_capture=True)
-        result = {}
-        for key, acts in self._activations.items():
-            result[key] = torch.cat(acts) if acts else None
+        
+        result = {
+            "prefill": torch.cat(self._activations["prefill"]) if self._activations["prefill"] else None,
+            "token": [torch.stack(p) for p in self._activations["token"] if p] or None
+        }
+        
         if reset:
             self.reset()
         return result
-    
+
+    @staticmethod
+    def align(result, texts, classifier):
+        """
+        Align token activations with classifier labels.
+        
+        Args:
+            result: Output of finalize() — result["token"] must be a list of Tensor[K_i, num_layers, hidden_dim]
+            texts: Decoded generated texts, one per prompt.
+            classifier: Classifier instance.
+        
+        Returns:
+            acts: Tensor[N_total, num_layers, hidden_dim]
+            labels: Tensor[N_total]
+        """
+        acts_flat = []
+        labels_flat = []
+        for text, prompt_acts in zip(texts, result["token"]):
+            label = classifier.classify([text]).squeeze()
+            K = prompt_acts.shape[0]
+            acts_flat.append(prompt_acts)
+            labels_flat.extend([label] * K)
+        
+        return torch.cat(acts_flat), torch.stack(labels_flat)
+            
     def reset(self):
         self._activations = {"prefill": [], "token": []}
         self._acts_buffer = {}

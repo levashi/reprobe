@@ -95,8 +95,8 @@ if "__main__" == __name__:
 
     
     # 4. Inférence et Collecte
-    labels = {"prefill": [], "token": []}
-
+    labels = {"prefill": []}
+    all_texts = {"token": []}
 
     def process_data(dataset, desc):
         items = list(dataset)
@@ -112,7 +112,7 @@ if "__main__" == __name__:
                 pad_token_id=tokenizer.pad_token_id
             ).to(device)
             
-            interceptor.allow_one_capture()
+            interceptor.allow_one_capture(len(batch))
             
             if mode == "prefill":
                 with torch.no_grad():
@@ -125,19 +125,17 @@ if "__main__" == __name__:
                     outputs_ids = model.generate(**inputs, max_new_tokens=100, do_sample=False)
                 prompt_len = inputs["input_ids"].shape[1]
                 texts = tokenizer.batch_decode(outputs_ids[:, prompt_len:], skip_special_tokens=True)
-                for text in texts:
-                    labels["token"].append(classifier.classify([text]))
+                all_texts["token"].extend(texts) 
 
             elif mode == "all":
                 with torch.no_grad():
                     outputs_ids = model.generate(**inputs, max_new_tokens=100, do_sample=False)
                 prompt_len = inputs["input_ids"].shape[1]
                 texts = tokenizer.batch_decode(outputs_ids[:, prompt_len:], skip_special_tokens=True)
+                all_texts["token"].extend(texts) 
                 # prefill capturé automatiquement par l'interceptor pendant le generate
                 for item in batch:
                     labels["prefill"].append(torch.tensor([0.0 if item["is_safe"] else 1.0]))
-                for text in texts:
-                    labels["token"].append(classifier.classify([text]))
 
     logger.info(f"Batch size set to {batch_size}")
     process_data(unsafe_data, "Extracting Unsafe (Violence) acts")
@@ -146,9 +144,15 @@ if "__main__" == __name__:
     
     
     acts_dict = interceptor.finalize()
+    token_acts, token_labels = None, None
+    if mode in ["token", "all"]:
+        token_acts, token_labels = Interceptor.align(acts_dict, all_texts["token"], classifier)
+    
+    acts_dict["token"] = token_acts
+    
     labels_dict = {
         "prefill": torch.cat(labels["prefill"]) if labels["prefill"] else None,
-        "token": torch.cat(labels["token"]) if labels["token"] else None,
+        "token": token_labels if token_labels is not None else None,
     }
     
     
@@ -161,8 +165,9 @@ if "__main__" == __name__:
     torch.save({"acts": acts_dict, "labels": labels_dict}, output_file)
     logger.info("Extraction complete. Ready for Supervisor Training!")
 
-    hidden_dim = acts_dict["prefill"].shape[-1] if acts_dict["prefill"] is not None else acts_dict["token"].shape[-1]
-
+    hidden_dim = acts_dict["prefill"].shape[-1] if acts_dict["prefill"] is not None \
+             else token_acts.shape[-1] 
+             
     probe_trainer = ProbesTrainer(config.get("model").get("name", "unknow"), hidden_dim, device="cuda")
     
     probe_trainer.train_probes(

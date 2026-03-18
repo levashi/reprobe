@@ -1,5 +1,4 @@
-from typing import Literal, TypedDict, Callable
-from datasets import load_dataset
+from typing import Callable
 
 class Classifier():
     """
