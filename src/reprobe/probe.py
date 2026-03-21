@@ -118,7 +118,7 @@ class ProbesTrainer():
                 raise ValueError(f"mode='{training_mode}' but store has no data for '{mode}'")
             
         for mode in modes_to_train:
-            for layer_idx in tqdm.tqdm(range(store.start_layer, store.end_layer + 1), desc=f"Training Probes - mode: {mode}", disable=not show_tqdm):
+            for layer_idx in tqdm.tqdm(range(store.start_layer, store.end_layer), desc=f"Training Probes - mode: {mode}", disable=not show_tqdm):
                 acts, labels = store.get_layer(mode, layer_idx)  # [N, hidden_dim], [N]
                 labels = (labels).float().unsqueeze(1)
                 probe = Probe(
