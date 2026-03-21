@@ -1,4 +1,5 @@
 import os
+import random
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from datasets import load_dataset
@@ -179,8 +180,9 @@ if "__main__" == __name__:
                 )
 
     logger.info(f"Batch size set to {batch_size}")
-    process_data(unsafe_data, "Extracting Unsafe (Violence) acts")
-    process_data(safe_data, "Extracting Safe acts")
+    data = unsafe_data + safe_data
+    random.shuffle(data)
+    process_data(data, "Extracting acts")
     
     
     interceptor.detach()
