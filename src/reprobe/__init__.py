@@ -5,6 +5,7 @@ from .monitor import Monitor
 from .steerer import Steerer
 from .loader import ProbeLoader
 from .classifier import Classifier
+from .store import ActivationStore
 __version__ = "0.1.0"
 __all__ = [
     "Hook",
@@ -14,5 +15,6 @@ __all__ = [
     "Interceptor",
     "Monitor",
     "Steerer",
-    "Classifier"
+    "Classifier",
+    "ActivationStore"
 ]

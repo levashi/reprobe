@@ -2,7 +2,6 @@ from typing import Literal
 import torch
 from .hook import Hook
 
-
 class Interceptor(Hook):
     def __init__(
         self, 
@@ -15,7 +14,7 @@ class Interceptor(Hook):
         super().__init__(model, _layers_path)
         
         self.training_mode = training_mode
-        self._activations = {
+        self._current_batch = {
             "prefill": [],
             "token": []
         }
@@ -26,6 +25,7 @@ class Interceptor(Hook):
         self.start_layer = start_layer
         
         self.end_layer = end_layer
+        
         
     def _get_layers_to_hook(self):
         # None because we don't need special data
@@ -67,14 +67,8 @@ class Interceptor(Hook):
     
     def allow_one_capture(self, batch_size):
         self._capture_next = True
-        if self.training_mode in ("token", "all"):
-            new_prompts = []
-            for _ in range(batch_size):
-                group = []
-                self._activations["token"].append(group)
-                new_prompts.append(group)
-            self._current_token_prompts = new_prompts 
-        return self  
+        self._current_batch = {"prefill": [], "token": [[] for _ in range(batch_size)]}
+        return self
     
     def _flush(self, to: Literal["prefill", "token"] ,block_capture=True):
         if self._acts_buffer:
@@ -87,14 +81,43 @@ class Interceptor(Hook):
             
             for i in range(stacked_cpu.shape[0]):
                 if to == "token":
-                    self._current_token_prompts[i].append(stacked_cpu[i])  # [num_layers, hidden_dim]
+                    self._current_batch["token"][i].append(stacked_cpu[i])  # [num_layers, hidden_dim]
                 else:
-                    self._activations[to] += [stacked_cpu[i].unsqueeze(0)] #[1, num_layers, hidden_dim]
+                    self._current_batch[to] += [stacked_cpu[i].unsqueeze(0)] #[1, num_layers, hidden_dim]
             
             self._acts_buffer = {}
             if block_capture:
                 self._capture_next = False
     
+    def flush_batch(self) -> dict[str, torch.Tensor | None]:
+        """
+        Return:
+            A dict which look like this: 
+            {
+                "prefill": Tensor[batch, num_layers, hidden_dim],
+                "token": list[Tensor[K_i, num_layers, hidden_dim]]  
+            }
+            
+        """
+        result = {}
+        if self._current_batch["prefill"]:
+            result["prefill"] = torch.cat(self._current_batch["prefill"])
+        else:
+            result["prefill"] = None
+            
+        if any(self._current_batch["token"]):
+            result["token"] = [
+                torch.stack(prompt_tokens)  # [K_i, num_layers, hidden_dim]
+                for prompt_tokens in self._current_batch["token"]
+                if prompt_tokens
+            ]                              
+        else:
+            result["token"] = None
+            
+        self._current_batch = {"prefill": [], "token": [[] for _ in range(len(self._current_batch["token"]))]}
+        self._capture_next = False
+    
+            
     def attach(self):
         self._resolve_layers_if_none()
         if self.end_layer is None:

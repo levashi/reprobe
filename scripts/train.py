@@ -7,7 +7,7 @@ import argparse
 import logging
 import tomllib
 from detoxify import Detoxify
-from reprobe import ProbesTrainer, Interceptor, Classifier
+from reprobe import ProbesTrainer, Interceptor, Classifier, ActivationStore
 logging.basicConfig(
     level=logging.INFO,
     format="[%(asctime)s][%(levelname)s] %(message)s",
@@ -97,7 +97,7 @@ if "__main__" == __name__:
     logger.info(f"Safe data: {len(safe_data)}, unsafe data: {len(unsafe_data)}")
     interceptor = Interceptor(model, start_layer_to_hook, end_layer, training_mode=mode).attach()
 
-    
+    store = ActivationStore(os.path.join(output_dir, "acts", "acts.h5"), len(safe_data) + len(unsafe_data), mode)
     # 4. Inférence et Collecte
     labels = {"prefill": []}
     all_texts = {"token": []}
@@ -119,38 +119,53 @@ if "__main__" == __name__:
             interceptor.allow_one_capture(len(batch))
             
             if mode == "prefill":
-                with torch.no_grad():
+                with torch.inference_mode():
                     model(**inputs)
-                for item in batch:
-                    labels["prefill"].append(torch.tensor([0.0 if item["is_safe"] else 1.0]))
-
+                
+                acts = interceptor.flush_batch()
+                labels = torch.tensor([0.0 if item["is_safe"] else 1.0 for item in batch])
+                store.append(
+                    acts,
+                    {"prefill": labels, "token": None}
+                )
+                    
             elif mode == "token":
-                with torch.no_grad():
-                    outputs_ids = model.generate(**inputs, max_new_tokens=100, do_sample=False)
-                prompt_len = inputs["input_ids"].shape[1]
-                texts = tokenizer.batch_decode(outputs_ids[:, prompt_len:], skip_special_tokens=True)
-                all_texts["token"].extend(texts) 
-
+                with torch.inference_mode():
+                    model(**inputs, max_new_tokens=100, do_sample=False)
+                acts = interceptor.flush_batch()
+                
+                # prompt_len = inputs["input_ids"].shape[1]
+                #texts = tokenizer.batch_decode(outputs_ids[:, prompt_len:], skip_special_tokens=True)
+                # labels = [
+                #     classifier.classify([text]).squeeze().repeat(prompt_acts.shape[0])
+                #     for prompt_acts, text in zip(acts["token"], texts)
+                # ]
+                labels = torch.tensor([0.0 if item["is_safe"] else 1.0 for item in batch])
+                store.append(
+                    acts,
+                    {"prefill": None, "token": labels}
+                )
             elif mode == "all":
-                with torch.no_grad():
-                    outputs_ids = model.generate(**inputs, max_new_tokens=100, do_sample=False)
-                prompt_len = inputs["input_ids"].shape[1]
-                texts = tokenizer.batch_decode(outputs_ids[:, prompt_len:], skip_special_tokens=True)
-                all_texts["token"].extend(texts) 
-                # prefill capturé automatiquement par l'interceptor pendant le generate
-                for item in batch:
-                    labels["prefill"].append(torch.tensor([0.0 if item["is_safe"] else 1.0]))
+                with torch.inference_mode():
+                    model(**inputs, max_new_tokens=100, do_sample=False)
+                # prompt_len = inputs["input_ids"].shape[1]
+                # texts = tokenizer.batch_decode(output_ids[:, prompt_len:], skip_special_tokens=True)
+                # flushed = interceptor.flush_batch()
+                # 
+                # token_labels = [
+                #     classifier.classify([text]).squeeze().repeat(prompt_acts.shape[0])
+                #     for prompt_acts, text in zip(flushed["token"], texts)
+                # ]
+                prefill_labels = torch.tensor([0.0 if item["is_safe"] else 1.0 for item in batch])
+                store.append(
+                    acts,
+                    {"prefill": labels, "token": labels}
+                )
 
     logger.info(f"Batch size set to {batch_size}")
     process_data(unsafe_data, "Extracting Unsafe (Violence) acts")
     process_data(safe_data, "Extracting Safe acts")
     
-    
-    
-    acts_dict = interceptor.finalize()
-    token_acts, token_labels = None, None
-    if mode in ["token", "all"]:
-        token_acts, token_labels = Interceptor.align(acts_dict, all_texts["token"], classifier)
     
     acts_dict["token"] = token_acts
     

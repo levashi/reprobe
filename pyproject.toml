@@ -19,6 +19,7 @@ dependencies = [
     "detoxify>=0.5.2",   
     "matplotlib",
     "torch>=2.6.0",
+    "h5py"
 ]
 
 

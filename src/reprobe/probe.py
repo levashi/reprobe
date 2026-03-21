@@ -8,6 +8,8 @@ from sklearn.metrics import roc_auc_score
 import tqdm
 import logging
 
+from .store import ActivationStore
+
 logger = logging.getLogger(__name__)
 class ProbesTrainer():
     def __init__(self, model_id: str, hidden_dim: int, device: torch.device = "cpu"):
@@ -96,8 +98,7 @@ class ProbesTrainer():
     
     def train_probes(
         self,
-        acts: dict[str, torch.Tensor | None],    # {"prefill": [N, num_layers, hidden_dim] | None, "token": [N, num_layers, hidden_dim] | None}
-        labels: dict[str, torch.Tensor | None],  # {"prefill": [N] | None, "token": [N] | None}
+        store: "ActivationStore",
         concepts: list[str],
         training_mode: Literal["prefill", "token", "all"]  = "prefill",
         layer_offset: int = 0,
