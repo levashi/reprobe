@@ -37,6 +37,8 @@ class ActivationStore:
         path: str,
         N: int,
         mode: Literal["prefill", "token", "all"],
+        start_layer: int, 
+        end_layer: int, 
         resume: bool = False,
     ):
         """
@@ -59,6 +61,9 @@ class ActivationStore:
         self.hidden_dim: int | None = None
         self._initialized = False
 
+        self.start_layer = start_layer
+        self.end_layer = end_layer
+        
         parent = os.path.dirname(path)
         if parent:
             os.makedirs(parent, exist_ok=True)
@@ -67,11 +72,7 @@ class ActivationStore:
             self._resume()
         elif not resume and os.path.exists(path):
             os.remove(path)
-
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
-
+            
     def append(
         self,
         acts: "dict[str, torch.Tensor | list[torch.Tensor] | None]",
@@ -104,53 +105,23 @@ class ActivationStore:
                 l = labels.get(m)
                 if a is None or l is None:
                     continue
+                
                 if m == "prefill":
                     self._append_prefill(f, a, l)
                 else:
                     self._append_token(f, a, l)
 
-    def get_prefill(self) -> "tuple[torch.Tensor, torch.Tensor]":
+    def get_layer(self, mode: Literal["prefill", "token"], layer_idx: int) -> "tuple[torch.Tensor, torch.Tensor]":
         """
-        Return all prefill activations and labels as tensors.
-            acts:   Tensor[N, num_layers, hidden_dim]
+        Return all activations and labels for a single layer.
+            acts:   Tensor[N, hidden_dim]
             labels: Tensor[N]
-        Loads everything into RAM — only call this from ProbesTrainer.
         """
-        self._check_mode("prefill")
-        n = self.cursors["prefill"]
+        n = self.cursors[mode]
         with h5py.File(self.path, "r") as f:
-            acts = torch.from_numpy(f["prefill/acts"][:n].copy())
-            labels = torch.from_numpy(f["prefill/labels"][:n].copy())
+            acts = torch.from_numpy(f[f"{mode}/{layer_idx}/acts"][:n].copy())
+            labels = torch.from_numpy(f[f"{mode}/{layer_idx}/labels"][:n].copy())
         return acts, labels
-
-    def get_token_prompt(self, prompt_idx: int) -> "tuple[torch.Tensor, torch.Tensor]":
-        """
-        Return activations and labels for a single prompt.
-            acts:   Tensor[K_i, num_layers, hidden_dim]
-            labels: Tensor[K_i]
-        """
-        self._check_mode("token")
-        with h5py.File(self.path, "r") as f:
-            start, end = f["token/index"][prompt_idx]
-            acts = torch.from_numpy(f["token/acts"][start:end].copy())
-            labels = torch.from_numpy(f["token/labels"][start:end].copy())
-        return acts, labels
-
-    def iter_token_prompts(self):
-        """
-        Iterate over all token prompts, yielding (acts, labels) one prompt at a time.
-        Never loads more than one prompt into RAM — use this in ProbesTrainer.
-            acts:   Tensor[K_i, num_layers, hidden_dim]
-            labels: Tensor[K_i]
-        """
-        self._check_mode("token")
-        n = self.cursors["token"]
-        with h5py.File(self.path, "r") as f:
-            for i in range(n):
-                start, end = f["token/index"][i]
-                acts = torch.from_numpy(f["token/acts"][start:end].copy())
-                labels = torch.from_numpy(f["token/labels"][start:end].copy())
-                yield acts, labels
 
     @property
     def n_prefill(self) -> int:
@@ -159,10 +130,6 @@ class ActivationStore:
     @property
     def n_token_prompts(self) -> int:
         return self.cursors.get("token", 0)
-
-    # ------------------------------------------------------------------
-    # Internal
-    # ------------------------------------------------------------------
 
     def _initialize(self, num_layers: int, hidden_dim: int):
         self.num_layers = num_layers
@@ -176,44 +143,42 @@ class ActivationStore:
             f.attrs["cursors"] = json.dumps(self.cursors)
 
             if "prefill" in self._modes and "prefill" not in f:
-                grp = f.create_group("prefill")
-                grp.create_dataset(
-                    "acts",
-                    shape=(self.N, num_layers, hidden_dim),
-                    dtype="float32",
-                )
-                grp.create_dataset(
-                    "labels",
-                    shape=(self.N,),
-                    dtype="float32",
-                )
+                prefill = f.create_group("prefill")
+                for idx in range(self.start_layer, self.end_layer):
+                    grp = prefill.create_group(str(idx))
+                    grp.create_dataset(
+                        "acts",
+                        shape=(self.N, hidden_dim),
+                        dtype="float32",
+                    )
+                    grp.create_dataset(
+                        "labels",
+                        shape=(self.N,),
+                        dtype="float32",
+                    )
 
             if "token" in self._modes and "token" not in f:
-                grp = f.create_group("token")
-                chunk = min(self._TOKEN_CHUNK, 1024)
-                grp.create_dataset(
-                    "acts",
-                    shape=(0, num_layers, hidden_dim),
-                    maxshape=(None, num_layers, hidden_dim),
-                    dtype="float32",
-                    chunks=(chunk, num_layers, hidden_dim),
-                )
-                grp.create_dataset(
-                    "labels",
-                    shape=(0,),
-                    maxshape=(None,),
-                    dtype="float32",
-                    chunks=(chunk,),
-                )
-                # (start, end) row index per prompt → O(1) access
-                grp.create_dataset(
-                    "index",
-                    shape=(self.N, 2),
-                    dtype="int64",
-                )
+                token = f.create_group("token")
+                for idx in range(self.start_layer, self.end_layer):
+                    grp = token.create_group(str(idx))
+                    chunk = min(self._TOKEN_CHUNK, 1024)
+                    grp.create_dataset(
+                        "acts",
+                        shape=(0, hidden_dim),
+                        maxshape=(None, hidden_dim),
+                        dtype="float32",
+                        chunks=(chunk, hidden_dim),
+                    )
+                    grp.create_dataset(
+                        "labels",
+                        shape=(0,),
+                        maxshape=(None,),
+                        dtype="float32",
+                        chunks=(chunk,),
+                    )
 
         self._initialized = True
-
+            
     def _append_prefill(self, f: "h5py.File", acts: "torch.Tensor", labels: "torch.Tensor"):
         a_np = acts.float().cpu().numpy()    # [batch, num_layers, hidden_dim]
         l_np = labels.float().cpu().numpy()  # [batch]
@@ -226,8 +191,11 @@ class ActivationStore:
                 f"tried to write {cur + batch} samples but N={self.N}."
             )
 
-        f["prefill/acts"][cur : cur + batch] = a_np
-        f["prefill/labels"][cur : cur + batch] = l_np
+        for idx in range(self.start_layer, self.end_layer):
+            layer_acts = a_np[:, idx - self.start_layer, :]
+
+            f[f"prefill/{idx}/acts"][cur : cur + batch] = layer_acts
+            f[f"prefill/{idx}/labels"][cur : cur + batch] = l_np
         self.cursors["prefill"] += batch
         self._save_cursors(f)
 
@@ -249,24 +217,25 @@ class ActivationStore:
                 f"tried to write prompt {cur_prompt + len(acts)} but N={self.N}."
             )
 
-        token_ds = f["token/acts"]
-        label_ds = f["token/labels"]
-        index_ds = f["token/index"]
-
         for prompt_acts, prompt_labels in zip(acts, labels):
             a_np = prompt_acts.float().cpu().numpy()    # [K_i, num_layers, hidden_dim]
             l_np = prompt_labels.float().cpu().numpy()  # [K_i]
             K = a_np.shape[0]
+            
+            for layer_idx in range(self.start_layer, self.end_layer):
+                token_ds = f[f"token/{layer_idx}/acts"]
+                label_ds = f[f"token/{layer_idx}/labels"]
+                
+                start = token_ds.shape[0]
+                
+                token_ds.resize(start + K, axis=0)
+                label_ds.resize(start + K, axis=0)
+                
+                token_ds[start : start + K] = a_np[:, layer_idx - self.start_layer, :]
+                label_ds[start : start + K] = l_np
 
-            start = token_ds.shape[0]
-            token_ds.resize(start + K, axis=0)
-            label_ds.resize(start + K, axis=0)
-            token_ds[start : start + K] = a_np
-            label_ds[start : start + K] = l_np
-            index_ds[cur_prompt] = (start, start + K)
-
+            
             cur_prompt += 1
-
         self.cursors["token"] = cur_prompt
         self._save_cursors(f)
 

@@ -40,7 +40,7 @@ if "__main__" == __name__:
     logger.info(f"Using {device}")
     
     model_id = config.get("model", {}).get("name", "Qwen/Qwen2.5-1.5B")
-    start_layer_to_hook = config.get("model", {}).get("layer", 12)
+    start_layer_to_hook = config.get("model", {}).get("starting_layer", 1)
     end_layer = config.get("model", {}).get("end_layer", None)
     end_layer = None if end_layer == "last" else end_layer
     max_input_tokens = config.get("max_input_tokens", 2048)
@@ -97,7 +97,13 @@ if "__main__" == __name__:
     logger.info(f"Safe data: {len(safe_data)}, unsafe data: {len(unsafe_data)}")
     interceptor = Interceptor(model, start_layer_to_hook, end_layer, training_mode=mode).attach()
 
-    store = ActivationStore(os.path.join(output_dir, "acts", "acts.h5"), len(safe_data) + len(unsafe_data), mode)
+    store = ActivationStore(
+        os.path.join(output_dir, "acts", "acts.h5"),
+        len(safe_data) + len(unsafe_data),
+        mode,
+        start_layer_to_hook,
+        len(interceptor._resolve_layers(model))
+    )
     # 4. Inférence et Collecte
     labels = {"prefill": []}
     all_texts = {"token": []}
@@ -131,7 +137,7 @@ if "__main__" == __name__:
                     
             elif mode == "token":
                 with torch.inference_mode():
-                    model(**inputs, max_new_tokens=100, do_sample=False)
+                    model.generate(**inputs, max_new_tokens=100, do_sample=False)
                 acts = interceptor.flush_batch()
                 
                 # prompt_len = inputs["input_ids"].shape[1]
@@ -140,14 +146,17 @@ if "__main__" == __name__:
                 #     classifier.classify([text]).squeeze().repeat(prompt_acts.shape[0])
                 #     for prompt_acts, text in zip(acts["token"], texts)
                 # ]
-                labels = torch.tensor([0.0 if item["is_safe"] else 1.0 for item in batch])
+                token_labels = [
+                    torch.tensor(0.0 if item["is_safe"] else 1.0).repeat(prompt_acts.shape[0])
+                    for item, prompt_acts in zip(batch, acts["token"])
+                ]
                 store.append(
                     acts,
-                    {"prefill": None, "token": labels}
+                    {"prefill": None, "token": token_labels}
                 )
             elif mode == "all":
                 with torch.inference_mode():
-                    model(**inputs, max_new_tokens=100, do_sample=False)
+                    model.generate(**inputs, max_new_tokens=100, do_sample=False)
                 # prompt_len = inputs["input_ids"].shape[1]
                 # texts = tokenizer.batch_decode(output_ids[:, prompt_len:], skip_special_tokens=True)
                 # flushed = interceptor.flush_batch()
@@ -156,10 +165,17 @@ if "__main__" == __name__:
                 #     classifier.classify([text]).squeeze().repeat(prompt_acts.shape[0])
                 #     for prompt_acts, text in zip(flushed["token"], texts)
                 # ]
+                acts = interceptor.flush_batch()
+                
                 prefill_labels = torch.tensor([0.0 if item["is_safe"] else 1.0 for item in batch])
+                token_labels = [
+                    torch.tensor(0.0 if item["is_safe"] else 1.0).repeat(prompt_acts.shape[0])
+                    for item, prompt_acts in zip(batch, acts["token"])
+                ]
+                
                 store.append(
                     acts,
-                    {"prefill": labels, "token": labels}
+                    {"prefill": prefill_labels, "token": token_labels}
                 )
 
     logger.info(f"Batch size set to {batch_size}")
@@ -167,32 +183,19 @@ if "__main__" == __name__:
     process_data(safe_data, "Extracting Safe acts")
     
     
-    acts_dict["token"] = token_acts
-    
-    labels_dict = {
-        "prefill": torch.cat(labels["prefill"]) if labels["prefill"] else None,
-        "token": token_labels if token_labels is not None else None,
-    }
-    
-    
     interceptor.detach()
-    for k, v in acts_dict.items():
-        if v is not None:
-            logger.info(f"acts[{k}] shape: {v.shape}")
+            
     logger.info(f"Saving to {output_file}...")
     
-    torch.save({"acts": acts_dict, "labels": labels_dict}, output_file)
     logger.info("Extraction complete. Ready for Supervisor Training!")
 
-    hidden_dim = acts_dict["prefill"].shape[-1] if acts_dict["prefill"] is not None \
-             else token_acts.shape[-1] 
+    hidden_dim = store.hidden_dim
              
     probe_trainer = ProbesTrainer(config.get("model").get("name", "unknow"), hidden_dim, device="cuda")
     
     probe_trainer.train_probes(
-        acts_dict,
-        labels_dict, concepts=['toxicity', 'severe_toxicity', 'threat', 'insult'],
-        layer_offset=start_layer_to_hook, 
+        store,
+        concepts=['toxicity', 'severe_toxicity', 'threat', 'insult'],
         epochs=5,
         batch_size= 256,
         show_tqdm = True,

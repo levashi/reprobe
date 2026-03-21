@@ -101,65 +101,47 @@ class ProbesTrainer():
         store: "ActivationStore",
         concepts: list[str],
         training_mode: Literal["prefill", "token", "all"]  = "prefill",
-        layer_offset: int = 0,
         epochs: int = 15,
         batch_size: int = 32,
         show_tqdm: bool = False,
         show_stats: bool = True
     ):
         self.training_mode = training_mode
-        # Checks
-        if training_mode != "all" and acts[training_mode] is None:
-            raise ValueError(f"mode='{training_mode}' but acts['{training_mode}'] is None")
-        if training_mode == "all":
-            if acts["prefill"] is None:
-                raise ValueError("mode='all' but acts['prefill'] is None")
-            if acts["token"] is None:
-                raise ValueError("mode='all' but acts['token'] is None")
-            
-        if training_mode != "all" and labels[training_mode] is None:
-            raise ValueError(f"mode='{training_mode}' but labels['{training_mode}'] is None")
-        if training_mode == "all":
-            if labels["prefill"] is None:
-                raise ValueError("mode='all' but labels['prefill'] is None")
-            if labels["token"] is None:
-                raise ValueError("mode='all' but labels['token'] is None")
+        self.num_layers = store.end_layer - store.start_layer
+        self.layer_offset = store.start_layer
         
         modes_to_train = ["prefill", "token"] if training_mode == "all" else [training_mode]
+        
+        # Checks
         for mode in modes_to_train:
-            mode_acts = acts[mode]       # Tensor [N, num_layers, hidden_dim]
-            mode_labels = labels[mode]   # Tensor [N]
+            if store.cursors.get(mode, 0) == 0:
+                raise ValueError(f"mode='{training_mode}' but store has no data for '{mode}'")
             
-            y = (mode_labels > 0.5).float().unsqueeze(1) # from probability to bool
-            
-            num_layers = mode_acts.shape[1]
-            
-            self.num_layers = num_layers
-            self.layer_offset = layer_offset
-            
-            for layer_idx in tqdm.tqdm(range(num_layers), desc=f"Training Probes - mode: {mode}", disable=not show_tqdm):
-                real_layer = layer_offset + layer_idx
+        for mode in modes_to_train:
+            for layer_idx in tqdm.tqdm(range(store.start_layer, store.end_layer + 1), desc=f"Training Probes - mode: {mode}", disable=not show_tqdm):
+                acts, labels = store.get_layer(mode, layer_idx)  # [N, hidden_dim], [N]
+                labels = (labels).float().unsqueeze(1)
                 probe = Probe(
                     hidden_dim=self.hidden_dim,
                     concepts=concepts,
-                    layer = real_layer,
+                    layer = layer_idx,
                     model_id=self.model_id,
                     training_mode = mode,
                 ).to(self.device)
                 
                 acc = self._train_one(
                     probe, 
-                    mode_acts[:, layer_idx, :],
-                    y,
+                    acts,
+                    labels,
                     epochs,
                     show_tqdm=show_tqdm,
                     batch_size=batch_size
                 )
                 probe.meta["auc"] = round(acc, 4)
-                self.probes[mode][real_layer] = probe
+                self.probes[mode][layer_idx] = probe
                 
                 if show_stats:
-                    tqdm.tqdm.write(f"{mode} | Layer {real_layer} | ROC-AUC: {acc:.3f}")
+                    tqdm.tqdm.write(f"{mode} | Layer {layer_idx} | ROC-AUC: {acc:.3f}")
     
     def save(self, dir: str, one_file: bool = False, merge = False):
         if not self.training_mode:

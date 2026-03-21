@@ -19,7 +19,7 @@ class Interceptor(Hook):
             "token": []
         }
         self._capture_next = False  
-        self._acts_buffer = {} # Utilisation d'un dict pour garantir l'ordre des layers
+        self._acts_buffer = {}
         self._current_token_prompts = []
         
         self.start_layer = start_layer
@@ -116,6 +116,8 @@ class Interceptor(Hook):
             
         self._current_batch = {"prefill": [], "token": [[] for _ in range(len(self._current_batch["token"]))]}
         self._capture_next = False
+        
+        return result
     
             
     def attach(self):
