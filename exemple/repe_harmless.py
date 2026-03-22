@@ -9,7 +9,7 @@ This script reproduces the core RepE harmlessness experiment:
   2. Train linear probes to detect the "harmlessness" concept per layer
   3. Steer the model at inference to suppress harmful outputs
 
-Model: Qwen/Qwen2.5-3B-Instruct
+Model: Qwen/Qwen2.5-3B
 Dataset: justinphan3110/harmful_harmless_instructions (RepE's original dataset)
 
 Usage:
@@ -27,7 +27,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from reprobe import Interceptor, ProbesTrainer, ProbeLoader, ActivationStore
 
 # Config
-MODEL_ID        = "Qwen/Qwen2.5-3B-Instruct"
+MODEL_ID        = "Qwen/Qwen2.5-3B"
 DEVICE          = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Layers to hook — RepE uses middle layers, ~50-75% depth.
@@ -37,7 +37,7 @@ END_LAYER       = 22
 
 # Steering — RepE uses alpha in [10, 20] for harmlessness
 LAYERS_TO_STEER = list(range(14, 28))
-ALPHA           = 1.5
+ALPHA           = 8
 
 OUTPUT_DIR      = "outputs/repe_harmless"
 MAX_NEW_TOKENS  = 200
