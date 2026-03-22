@@ -161,7 +161,7 @@ class ProbesTrainer():
         if not one_file:
             path = os.path.join(dir, "registry.json")
         else:
-            path = os.path.join(dir, f"{self.model_id}_probes.pt")
+            path = os.path.join(dir, f"probes.pt")
         
         if not os.path.exists(path) and merge:
             logger.warning(f"No probe file existing in {dir}")

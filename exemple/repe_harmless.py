@@ -33,7 +33,7 @@ DEVICE          = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # Layers to hook — RepE uses middle layers, ~50-75% depth.
 # Llama-3.2-3B has 28 layers → hook 10-22
 START_LAYER     = 10
-END_LAYER       = 28
+END_LAYER       = 22
 
 # Steering — RepE uses alpha in [10, 20] for harmlessness
 LAYERS_TO_STEER = list(range(14, 28))
@@ -186,7 +186,7 @@ def train_probes(store: ActivationStore, model_id: str, tmpdir: str) -> str:
     )
 
     probe_dir = os.path.join(tmpdir, "probes")
-    trainer.save(probe_dir)
+    trainer.save(probe_dir, one_file = True)
     print(f"  Probes saved to {probe_dir}")
     return probe_dir
 
@@ -194,7 +194,7 @@ def train_probes(store: ActivationStore, model_id: str, tmpdir: str) -> str:
 # 
 # Step 3: Evaluate base vs steered
 
-def evaluate(model, tokenizer, probe_dir: str):
+def evaluate(model, tokenizer,  probe_dir: str):
     print("\nEvaluating steering")
 
     registry_path = os.path.join(probe_dir, "registry.json")
