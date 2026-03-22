@@ -197,7 +197,7 @@ def train_probes(store: ActivationStore, model_id: str, tmpdir: str) -> str:
 def evaluate(model, tokenizer,  probe_dir: str):
     print("\nEvaluating steering")
 
-    registry_path = os.path.join(probe_dir, "registry.json")
+    registry_path = os.path.join(probe_dir, "probes.pt")
 
     steerer = ProbeLoader.steerer(
         model,

@@ -69,31 +69,33 @@ class ProbeLoader:
     
     @staticmethod
     def load(path: str, **hf_kwargs) -> dict[int, Probe]:
-        path = Path(path)
+        p = Path(path)
 
-        if path.exists():
-            if path.suffix == ".pt":
-                return ProbeLoader.from_file(path)
+        if p.exists():
+            if p.suffix == ".pt":
+                return ProbeLoader.from_file(p)
 
-            if path.suffix == ".json":
-                return ProbeLoader.from_registry(path)
+            if p.suffix == ".json":
+                return ProbeLoader.from_registry(p)
 
-            raise ValueError(f"Unsupported file type: {path}")
+            raise ValueError(f"Unsupported file type: {p}")
 
         try:
             from huggingface_hub import hf_hub_download, list_repo_files
         except ImportError:
             raise ImportError(
-                f"Path '{path}' not found locally. "
+                f"Path '{p}' not found locally. "
                 "To load from HuggingFace, install huggingface_hub: pip install huggingface_hub"
             )
         
-        files = [f for f in list_repo_files(path) if f.endswith(".pt")]
-        if not files:
-            raise ValueError(f"No .pt file found in HuggingFace repo '{path}'.")
-        
-        path = hf_hub_download(path, fliename=files[0], **hf_kwargs)
-        
+        try:
+            files = [f for f in list_repo_files(path) if f.endswith(".pt")]
+            if not files:
+                raise ValueError(f"No .pt file found in HuggingFace repo '{path}'.")
+            
+            path = hf_hub_download(path, fliename=files[0], **hf_kwargs)
+        except:
+            raise ValueError(f"Path doesn't exist and ins't available on hugging face: '{path}'.")
         return ProbeLoader.load(path)
     @staticmethod
     def _check_mode(
