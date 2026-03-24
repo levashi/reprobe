@@ -27,7 +27,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from reprobe import Interceptor, ProbesTrainer, ProbeLoader, ActivationStore
 
 # Config
-MODEL_ID        = "Qwen/Qwen2.5-3B"
+MODEL_ID        = "Qwen/Qwen2.5-3B-Instruct"
 DEVICE          = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Layers to hook — RepE uses middle layers, ~50-75% depth.
@@ -37,7 +37,7 @@ END_LAYER       = 22
 
 # Steering — RepE uses alpha in [10, 20] for harmlessness
 LAYERS_TO_STEER = list(range(14, 28))
-ALPHA           = 8
+ALPHA           = 3
 
 OUTPUT_DIR      = "outputs/repe_harmless"
 MAX_NEW_TOKENS  = 200
