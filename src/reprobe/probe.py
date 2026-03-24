@@ -64,7 +64,7 @@ class ProbesTrainer():
         optimizer = self.optim(probe.parameters(), **self.optim_kwargs)
         
         probe.train()
-        for _ in tqdm.tqdm(range(epochs), desc=f"Probe layer {probe.meta["layer"]}", unit="epoch", disable= not show_tqdm, leave=False):
+        for _ in tqdm.tqdm(range(epochs), desc=f"Probe layer {probe.meta['layer']}", unit="epoch", disable= not show_tqdm, leave=False):
             for batch_X, batch_y in train_loader:
                 batch_X = batch_X.to(self.device)
                 batch_y = batch_y.to(self.device)
