@@ -1,3 +1,9 @@
+license = {text = "MIT"}
+
+[project.urls]
+Homepage = "https://github.com/levashi/reprobe"
+Repository = "https://github.com/levashi/reprobe"
+
 [build-system]
 requires = ["setuptools>=61", "wheel"]
 build-backend = "setuptools.build_meta"
@@ -9,7 +15,7 @@ description = "Linear probes and activation steering for transformer models"
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [
-    {name = "LateFR"}
+    {name = "levashi"}
 ]
 dependencies = [
     "transformers>=5.0,<6.0",
