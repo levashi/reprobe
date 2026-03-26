@@ -14,7 +14,7 @@
 **Why?** I built `reprobe` to provide a practical, efficient implementation of the RepE paper. My goal was to create a tool that works with large models on normal hardware, without losing the mathematical clarity and control needed for safety research.
 
 
-## 🎭 Example: Narrative Steering with Qwen-3B
+## Example: Narrative Steering with Qwen-3B
 
 This example demonstrates how `reprobe` shifts a model's "latent mood" by targeting a **Harmfulness** concept. We use the same prompt and only toggle the `alpha` (steering strength).
 
@@ -70,8 +70,22 @@ The king sent his best scientists and doctors to study the disease, but they wer
 </details>
 
  
+ 
 > [!TIP]
 > The model completely shifts its narrative direction based on the applied probe. This demonstrates a highly successful steering intervention, where Qwen effortlessly oscillates between different latent storylines without degrading the grammar or structure.
+
+### 4. Probe Activation Visualization
+
+The plot below visualizes the Mean Concept Probability across layers during the prefill phase. Note how steering with `α=2.0` effectively collapses the harmfulness probability to near-zero, while `α=−2.0` intensifies the latent harmful representation, peaking in the middle layers (15–20) where the model's semantic reasoning is most plastic.
+
+![Probe Layer Separation](examples/figures/harmfulness_across_layers.png)
+
+> [!NOTE]
+The plot above utilizes a stress-test prompt (visible at the top of the image) to maximize concept separation. This explains why the probabilities shown here differ from the "King" narrative example presented earlier.
+
+> [!TIP]
+Only layers where probes are effective are highlighted to clearly demonstrate the separation. During the rest of the prefill phase, the model may not be actively processing the "harmfulness" concept, making probes naturally less active in those layers.
+
 ## Features
 
 The library is designed to be highly ergonomic yet mathematically rigorous. It abstracts away the complex engineering so you can focus on the research.
@@ -120,7 +134,7 @@ steerer = ProbeLoader.steerer(
     probe_dir,
     alpha={"prefill": 1.0, "token": 2.5}, # Steering strength
     # We can also set an alpha per layer, or pass a callback function to set dynamically the alpha
-    filter=lambda meta: meta["layer"] in range(12, 20) # Only steer middle layers. Optional.
+    filter=lambda meta: meta["layer"] in range(12, 20), # Only steer middle layers. Optional.
     mode="all" # between "prefill", "token" and "all". Must be compatible with your probes.
 )
 
